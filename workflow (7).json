@@ -1,0 +1,402 @@
+{
+  "name": "01 \u00b7 AI Lead Qualification + Instant Multi-Channel Follow-up",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-lead",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "d794b7a9-a0f2-4408-9aeb-70cd47bb0e38",
+      "name": "New Lead Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "0511638e-c6fb-41ae-b1b2-e90d6bf1bb98"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "83354b37-fd85-4389-90ca-86a6f8c393d1",
+              "name": "name",
+              "value": "={{ ($json.body.name || '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "dc8d90ac-9300-4e40-97a2-94d0ae534157",
+              "name": "first_name",
+              "value": "={{ ($json.body.name || '').trim().split(' ')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "8da0baf3-7e76-4271-b7c7-4ac49d0a26a5",
+              "name": "email",
+              "value": "={{ ($json.body.email || '').trim().toLowerCase() }}",
+              "type": "string"
+            },
+            {
+              "id": "a1af5d63-ecdd-4d15-8711-944efb4494b9",
+              "name": "phone",
+              "value": "={{ ($json.body.phone || '').replace(/[^0-9]/g, '') }}",
+              "type": "string"
+            },
+            {
+              "id": "dec8e84f-6fb2-48c5-af08-02b9dd06e97e",
+              "name": "country",
+              "value": "={{ $json.body.country || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "5ae70579-36b9-4c8c-989a-5e2adc4cd789",
+              "name": "budget",
+              "value": "={{ $json.body.budget || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "58d860b8-8c7c-465e-bb83-1fb3566725cc",
+              "name": "area",
+              "value": "={{ $json.body.area || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "fd524787-a3df-4517-b374-d5188ace657a",
+              "name": "property_type",
+              "value": "={{ $json.body.property_type || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "8a76d46e-7883-4175-b1aa-01349e1775d1",
+              "name": "timeline",
+              "value": "={{ $json.body.timeline || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "64d982fe-9232-4fcf-a3ce-1cb67fb42ad0",
+              "name": "purpose",
+              "value": "={{ $json.body.purpose || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "e0fd611b-fd89-42a4-b5ad-bf495a9ade52",
+              "name": "message",
+              "value": "={{ $json.body.message || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "b8e43b17-c9b4-4282-830d-749f42cf941e",
+              "name": "source",
+              "value": "={{ $json.body.source || 'website' }}",
+              "type": "string"
+            },
+            {
+              "id": "84744b2c-c28b-4abe-91ad-43d4f4c3bd2b",
+              "name": "hot_score_threshold",
+              "value": "70",
+              "type": "number"
+            },
+            {
+              "id": "892b24c1-7397-47e2-86db-c7b65102cb73",
+              "name": "whatsapp_phone_number_id",
+              "value": "PASTE_WHATSAPP_PHONE_NUMBER_ID",
+              "type": "string"
+            },
+            {
+              "id": "eddb7d13-b899-4bb2-ad76-e7d089f65634",
+              "name": "whatsapp_template",
+              "value": "new_lead_followup",
+              "type": "string"
+            },
+            {
+              "id": "f663052b-b0f9-4f5b-bcf0-50e6b82c2c43",
+              "name": "sales_alert_email",
+              "value": "PASTE_SALES_TEAM_EMAIL",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bf509847-3513-4759-8bfe-4fc481cfffee",
+      "name": "Config + Normalize Lead",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1024, temperature: 0.4, system: \"You qualify inbound leads for a real estate product sold to buyers and investors in the Middle East (UAE, Saudi Arabia, Qatar and the wider GCC). Score the lead from 0 to 100 on how likely they are to buy in the next 90 days, using budget, timeline, purpose (investment or end use), property type, area and message. Missing information lowers confidence, not automatically the score. Return JSON only with keys: score (integer), tier ('hot' | 'warm' | 'cold'), reasons (array of max 3 short strings), whatsapp_line (one friendly sentence under 25 words that references something specific the lead said, no emojis, no pressure), email_subject (under 8 words), email_body (under 90 words, plain text, ends by proposing a 15-minute call), next_best_action (one short sentence for the sales rep). Respond with the JSON object only, no other text.\", messages: [ { role: 'user', content: JSON.stringify({ name: $json.name, country: $json.country, budget: $json.budget, area: $json.area, property_type: $json.property_type, timeline: $json.timeline, purpose: $json.purpose, message: $json.message, source: $json.source }) } ] }) }}",
+        "options": {}
+      },
+      "id": "e985248b-9186-4bc9-8518-8d05bd1bb3fc",
+      "name": "AI Qualify + Personalize",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Claude returns text in content[0].text; pull out the JSON object\nconst claudeJson = r => { const t = (r.content && r.content[0] && r.content[0].text) || ''; return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); };\n// Merge the lead with the AI's scoring and messages\nconst leads = $('Config + Normalize Lead').all();\nreturn $input.all().map((item, i) => {\n  let ai = {};\n  try { ai = claudeJson(item.json); } catch (e) { ai = { score: 0, tier: 'cold', reasons: ['AI response could not be parsed'] }; }\n  const lead = leads[i].json;\n  return { json: { ...lead, ...ai, score: Number(ai.score) || 0, reasons: (ai.reasons || []).join('; '), received_at: new Date().toISOString() } };\n});"
+      },
+      "id": "eb88b033-0570-469b-b9fe-29070d7ff610",
+      "name": "Parse AI Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts/batch/upsert",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ inputs: [ { idProperty: 'email', id: $json.email, properties: { email: $json.email, firstname: $json.first_name, phone: $json.phone, country: $json.country, hs_lead_status: $json.tier === 'hot' ? 'OPEN' : 'NEW', ai_lead_score: $json.score, ai_lead_tier: $json.tier, ai_score_reasons: $json.reasons, ai_next_best_action: $json.next_best_action, lead_source_detail: $json.source } } ] }) }}",
+        "options": {}
+      },
+      "id": "370b8810-9278-4f65-9e51-321eaf3bfba7",
+      "name": "Upsert Contact in HubSpot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "8b173f26-0122-425b-b2b9-8bc4f5477af2",
+              "leftValue": "={{ $('Parse AI Result').item.json.score }}",
+              "rightValue": "={{ $('Parse AI Result').item.json.hot_score_threshold }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b66a2b76-d8ca-42a0-9696-8795c89dba97",
+      "name": "Hot Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{ $('Parse AI Result').item.json.whatsapp_phone_number_id }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $('Parse AI Result').item.json.phone, type: 'template', template: { name: $('Parse AI Result').item.json.whatsapp_template, language: { code: 'en' }, components: [ { type: 'body', parameters: [ { type: 'text', text: $('Parse AI Result').item.json.first_name || 'there' }, { type: 'text', text: $('Parse AI Result').item.json.whatsapp_line } ] } ] } }) }}",
+        "options": {}
+      },
+      "id": "59e05536-b7c4-487d-905a-7641115fc7b3",
+      "name": "WhatsApp Instant Follow-up",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        180
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "fromEmail": "PASTE_SENDER_EMAIL",
+        "toEmail": "={{ $('Parse AI Result').item.json.sales_alert_email }}",
+        "subject": "=HOT lead ({{ $('Parse AI Result').item.json.score }}/100): {{ $('Parse AI Result').item.json.name }}, {{ $('Parse AI Result').item.json.area }}",
+        "emailFormat": "text",
+        "text": "=New hot lead. Call within 15 minutes.\n\nName: {{ $('Parse AI Result').item.json.name }}\nPhone: {{ $('Parse AI Result').item.json.phone }}\nEmail: {{ $('Parse AI Result').item.json.email }}\nBudget: {{ $('Parse AI Result').item.json.budget }}\nArea / type: {{ $('Parse AI Result').item.json.area }} / {{ $('Parse AI Result').item.json.property_type }}\nTimeline: {{ $('Parse AI Result').item.json.timeline }}\n\nWhy hot: {{ $('Parse AI Result').item.json.reasons }}\nNext best action: {{ $('Parse AI Result').item.json.next_best_action }}\n\nWhatsApp follow-up has already been sent.",
+        "options": {}
+      },
+      "id": "78419523-d4c9-4a59-9c8e-c4e49692784b",
+      "name": "Alert Sales Team",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1560,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Nurture"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "received_at": "={{ $('Parse AI Result').item.json.received_at }}",
+            "name": "={{ $('Parse AI Result').item.json.name }}",
+            "email": "={{ $('Parse AI Result').item.json.email }}",
+            "phone": "={{ $('Parse AI Result').item.json.phone }}",
+            "score": "={{ $('Parse AI Result').item.json.score }}",
+            "tier": "={{ $('Parse AI Result').item.json.tier }}",
+            "reasons": "={{ $('Parse AI Result').item.json.reasons }}",
+            "email_subject": "={{ $('Parse AI Result').item.json.email_subject }}",
+            "email_body": "={{ $('Parse AI Result').item.json.email_body }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "03deec1f-6e8a-45b4-8c6c-adfc31ea2dde",
+      "name": "Add to Nurture List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1340,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "New Lead Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config + Normalize Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config + Normalize Lead": {
+      "main": [
+        [
+          {
+            "node": "AI Qualify + Personalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Qualify + Personalize": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Result": {
+      "main": [
+        [
+          {
+            "node": "Upsert Contact in HubSpot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Contact in HubSpot": {
+      "main": [
+        [
+          {
+            "node": "Hot Lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Instant Follow-up": {
+      "main": [
+        [
+          {
+            "node": "Alert Sales Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hot Lead?": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Instant Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Add to Nurture List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

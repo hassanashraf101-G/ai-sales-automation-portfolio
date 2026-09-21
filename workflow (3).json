@@ -1,0 +1,892 @@
+{
+  "name": "04 \u00b7 LinkedIn AI Outreach: Invites, First Message + Reply Triage (Unipile)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 11 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "8e69ad10-8ecd-44e3-a044-fdf2e2bb4469",
+      "name": "Weekdays 11:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0dae9506-947e-4e33-bbca-e29441962ad5",
+              "name": "unipile_base_url",
+              "value": "https://PASTE_YOUR_DSN/api/v1",
+              "type": "string"
+            },
+            {
+              "id": "f3023885-3ef9-43fc-a9a5-8bad36a6aad7",
+              "name": "unipile_account_id",
+              "value": "PASTE_LINKEDIN_ACCOUNT_ID",
+              "type": "string"
+            },
+            {
+              "id": "b057e272-9a33-4183-9011-c24470403556",
+              "name": "daily_invite_limit",
+              "value": "15",
+              "type": "number"
+            },
+            {
+              "id": "e9d456f6-c6d6-4d00-97f7-7f465e412102",
+              "name": "sender_name",
+              "value": "Hassan",
+              "type": "string"
+            },
+            {
+              "id": "5a7824bc-af92-4f85-a55e-7bf15d2fb319",
+              "name": "offer",
+              "value": "PASTE_ONE_LINE_OFFER e.g. off-plan and ready homes in Dubai with flexible payment plans",
+              "type": "string"
+            },
+            {
+              "id": "17a9dabe-ea36-4119-bb8c-0431796f37aa",
+              "name": "rep_email",
+              "value": "PASTE_REP_EMAIL",
+              "type": "string"
+            },
+            {
+              "id": "3e151e0a-be93-411c-9fe1-56f459498772",
+              "name": "sender_email",
+              "value": "PASTE_SENDER_EMAIL",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "99560c12-76b0-4d3f-bfb9-e6bc7dd292d0",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "LinkedIn"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "linkedin_status",
+              "lookupValue": "new"
+            }
+          ]
+        }
+      },
+      "id": "336be3e6-e23b-4134-987e-09c6db120715",
+      "name": "Get Leads to Invite",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        100
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Conservative daily cap to protect the LinkedIn account\nconst limit = $('Config').first().json.daily_invite_limit;\nreturn $input.all().filter(i => i.json.linkedin_url).slice(0, limit).map(i => {\n  const m = String(i.json.linkedin_url).match(/linkedin\\.com\\/in\\/([^/?#]+)/);\n  return { json: { ...i.json, public_identifier: m ? decodeURIComponent(m[1]) : '' } };\n}).filter(i => i.json.public_identifier);"
+      },
+      "id": "b10453cf-8eb7-48cd-90aa-0b92f048d343",
+      "name": "Pick Today's Batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.unipile_base_url }}/users/{{ $json.public_identifier }}?account_id={{ $('Config').first().json.unipile_account_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "a76f59e8-e5e2-49b8-b3ad-a52445294bd4",
+      "name": "Get LinkedIn Profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1024, temperature: 0.7, system: \"You write LinkedIn connection request notes for a sales professional who sells real estate to buyers and investors in the Middle East. Use one specific detail from the prospect's profile (role, company, location or headline). Rules: max 200 characters, no pitch, no links, no emojis, no flattery, sound like a real person. Return JSON with key: note. Respond with the JSON object only, no other text.\", messages: [ { role: 'user', content: JSON.stringify({ sender: $('Config').first().json.sender_name, prospect: { name: $json.first_name + ' ' + $json.last_name, headline: $json.headline, location: $json.location } }) } ] }) }}",
+        "options": {}
+      },
+      "id": "b20e7977-410f-493e-88db-d8bfac31387c",
+      "name": "Claude: Write Connection Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const claudeJson = r => { const t = (r.content && r.content[0] && r.content[0].text) || ''; return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); };\nconst batch = $('Pick Today\\'s Batch').all();\nconst profiles = $('Get LinkedIn Profile').all();\nreturn $input.all().map((item, i) => {\n  let note = ''; try { note = claudeJson(item.json).note || ''; } catch (e) {}\n  return { json: { ...batch[i].json, provider_id: profiles[i].json.provider_id, note: note.slice(0, 200) } };\n}).filter(x => x.json.provider_id);"
+      },
+      "id": "8d2be923-4200-43a7-acb7-93ea6e680dc9",
+      "name": "Prepare Invite",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.unipile_base_url }}/users/invite",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ account_id: $('Config').first().json.unipile_account_id, provider_id: $json.provider_id, message: $json.note }) }}"
+      },
+      "id": "c1ef6ce4-4147-4986-8668-6a3c7963b6dc",
+      "name": "Send LinkedIn Invite",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "LinkedIn"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "linkedin_url": "={{ $('Prepare Invite').item.json.linkedin_url }}",
+            "linkedin_status": "invited",
+            "provider_id": "={{ $('Prepare Invite').item.json.provider_id }}",
+            "invite_note": "={{ $('Prepare Invite').item.json.note }}",
+            "invited_at": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "linkedin_url"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "578eea12-542c-4676-9ebd-6cb1a9298054",
+      "name": "Log Invite",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1760,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "linkedin-accepted",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "815e3e97-676a-416d-9e59-a003ea1e2832",
+      "name": "Unipile: Invite Accepted",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        420
+      ],
+      "webhookId": "29c07628-92f1-4956-ab1e-e78db043c489"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3d621710-a432-48a5-905e-192bc5e8d584",
+              "name": "unipile_base_url",
+              "value": "https://PASTE_YOUR_DSN/api/v1",
+              "type": "string"
+            },
+            {
+              "id": "bf7c16b1-7b80-44f2-ac73-e6279fef5917",
+              "name": "unipile_account_id",
+              "value": "PASTE_LINKEDIN_ACCOUNT_ID",
+              "type": "string"
+            },
+            {
+              "id": "04b48f38-6495-415e-943a-01b1be0be8fb",
+              "name": "daily_invite_limit",
+              "value": "15",
+              "type": "number"
+            },
+            {
+              "id": "592fe039-de21-4ca2-af6f-318ee8955584",
+              "name": "sender_name",
+              "value": "Hassan",
+              "type": "string"
+            },
+            {
+              "id": "7b63396c-60d2-40c4-991e-49c29764f018",
+              "name": "offer",
+              "value": "PASTE_ONE_LINE_OFFER e.g. off-plan and ready homes in Dubai with flexible payment plans",
+              "type": "string"
+            },
+            {
+              "id": "a1e54ab3-5a6c-425e-95a6-4cdbe4a877aa",
+              "name": "rep_email",
+              "value": "PASTE_REP_EMAIL",
+              "type": "string"
+            },
+            {
+              "id": "c428e659-10a2-40f0-a3f1-a2eeb70c4518",
+              "name": "sender_email",
+              "value": "PASTE_SENDER_EMAIL",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1d69dbc5-ec91-4300-a4bc-942748b58c0d",
+      "name": "Config (accepted)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "LinkedIn"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "provider_id",
+              "lookupValue": "={{ $('Unipile: Invite Accepted').item.json.body.user_provider_id }}"
+            }
+          ]
+        }
+      },
+      "id": "43afaaed-b567-4735-836f-97f7dc2e1f28",
+      "name": "Find Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1024, temperature: 0.6, system: \"You write the first LinkedIn message after a prospect accepted a connection request. The seller offers real estate to buyers and investors in the Middle East. Rules: under 60 words, thank them briefly, one line on what the seller helps with (use the offer given), end with one easy question about their plans. No links, no emojis, no hard pitch. Return JSON with key: message. Respond with the JSON object only, no other text.\", messages: [ { role: 'user', content: JSON.stringify({ sender: $('Config (accepted)').first().json.sender_name, offer: $('Config (accepted)').first().json.offer, prospect_name: $('Unipile: Invite Accepted').item.json.body.user_full_name, company: $json.company, notes: $json.notes, invite_note: $json.invite_note }) } ] }) }}",
+        "options": {}
+      },
+      "id": "fc3d1d5a-b61b-405e-b11c-ae1dcbbb78d5",
+      "name": "Claude: Write First Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const claudeJson = r => { const t = (r.content && r.content[0] && r.content[0].text) || ''; return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); };\nconst hook = $('Unipile: Invite Accepted').first().json.body;\nlet message = ''; try { message = claudeJson($input.first().json).message || ''; } catch (e) {}\nreturn message ? [{ json: { provider_id: hook.user_provider_id, account_id: hook.account_id, message, linkedin_url: $('Find Lead').first().json.linkedin_url } }] : [];"
+      },
+      "id": "1d7321b6-57fc-4a30-8982-55f65aeb90c0",
+      "name": "Prepare Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config (accepted)').first().json.unipile_base_url }}/chats",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formData",
+              "name": "account_id",
+              "value": "={{ $json.account_id }}"
+            },
+            {
+              "parameterType": "formData",
+              "name": "attendees_ids",
+              "value": "={{ $json.provider_id }}"
+            },
+            {
+              "parameterType": "formData",
+              "name": "text",
+              "value": "={{ $json.message }}"
+            }
+          ]
+        }
+      },
+      "id": "d9c7cc41-315a-4474-95d0-ae4e56cfc277",
+      "name": "Send LinkedIn Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "LinkedIn"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "linkedin_url": "={{ $('Prepare Message').item.json.linkedin_url }}",
+            "linkedin_status": "messaged",
+            "first_message": "={{ $('Prepare Message').item.json.message }}",
+            "connected_at": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "linkedin_url"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "375e546b-42e8-47da-8749-6862a9a50ef3",
+      "name": "Log Message",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1320,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "linkedin-message",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "34d9428b-ab97-442a-9c00-0009a22b0cf2",
+      "name": "Unipile: New Message",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        740
+      ],
+      "webhookId": "24da1c68-83d5-4382-9998-085bf5db6c68"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "0d44c99a-bde7-4a7b-aa54-99e30fda8957",
+              "leftValue": "={{ $json.body.event }}",
+              "rightValue": "message_received",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "daf245aa-0f50-4f1b-a710-e4f7633c1fa6",
+              "leftValue": "={{ $json.body.sender.attendee_provider_id }}",
+              "rightValue": "={{ $json.body.account_info.user_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9a3eec4e-611a-4eff-866f-ab63295ca88f",
+      "name": "Is It a Reply From Them?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        220,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1024, temperature: 0.2, system: \"You classify a prospect's LinkedIn reply to a real estate seller focused on the Middle East. Return JSON with keys: intent ('interested' | 'question' | 'not_now' | 'not_interested' | 'other'), summary (one sentence), suggested_reply (under 50 words, helpful, moves toward a 15-minute call if interested; empty if not_interested), phone (any phone number they shared, else empty). Respond with the JSON object only, no other text.\", messages: [ { role: 'user', content: JSON.stringify({ from: $json.body.sender.attendee_name, message: $json.body.message }) } ] }) }}",
+        "options": {}
+      },
+      "id": "c1c495c3-e9e4-44d8-9119-e6ca2107fda2",
+      "name": "Claude: Classify Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const claudeJson = r => { const t = (r.content && r.content[0] && r.content[0].text) || ''; return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); };\nconst hook = $('Unipile: New Message').first().json.body;\nlet ai = { intent: 'other', summary: '', suggested_reply: '', phone: '' };\ntry { ai = { ...ai, ...claudeJson($input.first().json) }; } catch (e) {}\nreturn [{ json: { ...ai, name: hook.sender.attendee_name, profile_url: hook.sender.attendee_profile_url, provider_id: hook.sender.attendee_provider_id, message: hook.message, chat_id: hook.chat_id } }];"
+      },
+      "id": "4562fd7e-9e50-49e9-a884-58f2cd1ee1db",
+      "name": "Prepare Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "LinkedIn"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "provider_id": "={{ $json.provider_id }}",
+            "linkedin_status": "replied",
+            "reply_intent": "={{ $json.intent }}",
+            "reply_summary": "={{ $json.summary }}",
+            "phone": "={{ $json.phone }}",
+            "replied_at": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "provider_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "1ef6d40e-1c0d-4214-be3d-bedd29dc980c",
+      "name": "Log Reply",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "97f017bb-8093-403c-85b9-6c75b62534c7",
+              "leftValue": "={{ ['interested','question'].includes($('Prepare Alert').item.json.intent) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fe403d50-393d-40f8-a02a-105fa7a244ac",
+      "name": "Worth a Human Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "PASTE_SENDER_EMAIL",
+        "toEmail": "PASTE_REP_EMAIL",
+        "subject": "=LinkedIn reply ({{ $('Prepare Alert').item.json.intent }}): {{ $('Prepare Alert').item.json.name }}",
+        "emailFormat": "text",
+        "text": "={{ $('Prepare Alert').item.json.name }} replied on LinkedIn.\n\nTheir message:\n{{ $('Prepare Alert').item.json.message }}\n\nSummary: {{ $('Prepare Alert').item.json.summary }}\nPhone shared: {{ $('Prepare Alert').item.json.phone || 'none' }}\n\nSuggested reply (edit before sending):\n{{ $('Prepare Alert').item.json.suggested_reply }}\n\nProfile: {{ $('Prepare Alert').item.json.profile_url }}",
+        "options": {}
+      },
+      "id": "2a5ad188-49f8-4fe9-8d2f-4247edddd71d",
+      "name": "Alert Rep",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        740
+      ]
+    }
+  ],
+  "connections": {
+    "Weekdays 11:00": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Get Leads to Invite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Leads to Invite": {
+      "main": [
+        [
+          {
+            "node": "Pick Today's Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Today's Batch": {
+      "main": [
+        [
+          {
+            "node": "Get LinkedIn Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get LinkedIn Profile": {
+      "main": [
+        [
+          {
+            "node": "Claude: Write Connection Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Write Connection Note": {
+      "main": [
+        [
+          {
+            "node": "Prepare Invite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Invite": {
+      "main": [
+        [
+          {
+            "node": "Send LinkedIn Invite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send LinkedIn Invite": {
+      "main": [
+        [
+          {
+            "node": "Log Invite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unipile: Invite Accepted": {
+      "main": [
+        [
+          {
+            "node": "Config (accepted)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config (accepted)": {
+      "main": [
+        [
+          {
+            "node": "Find Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Lead": {
+      "main": [
+        [
+          {
+            "node": "Claude: Write First Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Write First Message": {
+      "main": [
+        [
+          {
+            "node": "Prepare Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Message": {
+      "main": [
+        [
+          {
+            "node": "Send LinkedIn Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send LinkedIn Message": {
+      "main": [
+        [
+          {
+            "node": "Log Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unipile: New Message": {
+      "main": [
+        [
+          {
+            "node": "Is It a Reply From Them?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Classify Reply": {
+      "main": [
+        [
+          {
+            "node": "Prepare Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Alert": {
+      "main": [
+        [
+          {
+            "node": "Log Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Reply": {
+      "main": [
+        [
+          {
+            "node": "Worth a Human Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is It a Reply From Them?": {
+      "main": [
+        [
+          {
+            "node": "Claude: Classify Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Worth a Human Reply?": {
+      "main": [
+        [
+          {
+            "node": "Alert Rep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

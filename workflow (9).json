@@ -1,0 +1,341 @@
+{
+  "name": "02 \u00b7 AI-Personalized Outbound with A/B Testing + Reply Tracking",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "a54c91ed-f159-4385-8126-d2605645d92c",
+      "name": "Weekdays 10:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "new"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5d3525a2-12b8-4b78-a6ff-1f67d1a7ba26",
+      "name": "Get New Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Daily send cap protects domain reputation. Leads alternate between two angles so reply rates can be compared.\nconst DAILY_LIMIT = 30;\nconst variants = {\n  A: { angle: 'Investment case: rental yield, capital growth and payment plans' },\n  B: { angle: 'Lifestyle and relocation: community, schools, commute and residency options' },\n};\nreturn $input.all().slice(0, DAILY_LIMIT).map((item, i) => {\n  const variant = i % 2 === 0 ? 'A' : 'B';\n  return { json: { ...item.json, variant, angle: variants[variant].angle } };\n});"
+      },
+      "id": "0769f4d3-cf8e-4539-a411-5cbb06a6811a",
+      "name": "Assign A/B Variant",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1024, temperature: 0.7, system: \"You write short first-touch sales emails for a real estate product sold to buyers and investors in the Middle East. Use the lead's details to write one specific opening line. Follow the given angle for the rest of the email. Rules: under 80 words, plain text, no compliments, no 'I hope this finds you well', no emojis, one clear question at the end. Return JSON only with keys: subject (under 7 words, lowercase is fine), body. Respond with the JSON object only, no other text.\", messages: [ { role: 'user', content: JSON.stringify({ lead: $json, angle: $json.angle }) } ] }) }}",
+        "options": {}
+      },
+      "id": "0f6c9c14-2b07-4415-b426-832674d1af8a",
+      "name": "AI Write Personalized Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Claude returns text in content[0].text; pull out the JSON object\nconst claudeJson = r => { const t = (r.content && r.content[0] && r.content[0].text) || ''; return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); };\nconst leads = $('Assign A/B Variant').all();\nreturn $input.all().map((item, i) => {\n  let ai = {};\n  try { ai = claudeJson(item.json); } catch (e) { ai = {}; }\n  return { json: { ...leads[i].json, subject: ai.subject || '', body: ai.body || '' } };\n}).filter(x => x.json.subject && x.json.body && x.json.email);"
+      },
+      "id": "d0bd97a0-590b-4993-8183-0f96b60f48ad",
+      "name": "Parse Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "0ee3a4ee-81b2-413c-a457-e589fb477896",
+      "name": "Send via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email": "={{ $('Parse Email').item.json.email }}",
+            "status": "contacted",
+            "variant": "={{ $('Parse Email').item.json.variant }}",
+            "subject": "={{ $('Parse Email').item.json.subject }}",
+            "sent_at": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "email"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "c15a69a3-3bcc-4bf2-b4f1-6aa352241aab",
+      "name": "Log Send + Variant",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "simple": true,
+        "filters": {
+          "labelIds": [
+            "INBOX"
+          ]
+        },
+        "options": {}
+      },
+      "id": "e6013e37-b103-4175-a5b9-c2fcec2dcfb3",
+      "name": "New Reply in Inbox",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const from = item.json.From || item.json.from || '';\n  const match = from.match(/<([^>]+)>/);\n  const email = (match ? match[1] : from).trim().toLowerCase();\n  return { json: { email, replied: 'yes', replied_at: new Date().toISOString() } };\n}).filter(x => x.json.email.includes('@'));"
+      },
+      "id": "db540749-483a-4540-80b9-66438ba67d40",
+      "name": "Extract Sender",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email": "={{ $json.email }}",
+            "replied": "yes",
+            "replied_at": "={{ $json.replied_at }}"
+          },
+          "matchingColumns": [
+            "email"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "29c0f01c-da8f-49c9-9d7b-b93efe0d8a31",
+      "name": "Mark Lead as Replied",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        480
+      ]
+    }
+  ],
+  "connections": {
+    "Weekdays 10:00": {
+      "main": [
+        [
+          {
+            "node": "Get New Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get New Leads": {
+      "main": [
+        [
+          {
+            "node": "Assign A/B Variant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign A/B Variant": {
+      "main": [
+        [
+          {
+            "node": "AI Write Personalized Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Write Personalized Email": {
+      "main": [
+        [
+          {
+            "node": "Parse Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Email": {
+      "main": [
+        [
+          {
+            "node": "Send via Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send via Gmail": {
+      "main": [
+        [
+          {
+            "node": "Log Send + Variant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Reply in Inbox": {
+      "main": [
+        [
+          {
+            "node": "Extract Sender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Sender": {
+      "main": [
+        [
+          {
+            "node": "Mark Lead as Replied",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

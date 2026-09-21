@@ -1,0 +1,219 @@
+{
+  "name": "03 \u00b7 Weekly Pipeline + A/B Test Report with AI Insights",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "e2a4226d-f6aa-4248-8351-de5f7b0b97dd",
+      "name": "Every Monday 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/deals/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ limit: 100, properties: ['dealname','dealstage','amount','createdate','closedate','hs_lastmodifieddate'], filterGroups: [ { filters: [ { propertyName: 'createdate', operator: 'GTE', value: String(Date.now() - 90*24*60*60*1000) } ] } ] }) }}",
+        "options": {}
+      },
+      "id": "7baa983b-6985-4e0d-a726-6988fe79223c",
+      "name": "Get Deals from HubSpot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "options": {}
+      },
+      "id": "e776befd-2f14-4fdc-a4b8-cdbb2aed51c0",
+      "name": "Get Outbound Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        200
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const deals = ($('Get Deals from HubSpot').first().json.results || []).map(d => d.properties);\nconst rows = $('Get Outbound Log').all().map(r => r.json).filter(r => r.email);\nconst DAY = 24*60*60*1000, now = Date.now();\n// HubSpot default pipeline stage ids. Rename if your pipeline uses custom stages.\nconst stageNames = { appointmentscheduled: 'Meeting booked', qualifiedtobuy: 'Qualified', presentationscheduled: 'Site visit / demo',\n  decisionmakerboughtin: 'Decision maker in', contractsent: 'Offer sent', closedwon: 'Won', closedlost: 'Lost' };\nconst byStage = {};\nfor (const d of deals) {\n  const s = stageNames[d.dealstage] || d.dealstage;\n  byStage[s] = byStage[s] || { count: 0, value: 0 };\n  byStage[s].count++; byStage[s].value += Number(d.amount) || 0;\n}\nconst won = deals.filter(d => d.dealstage === 'closedwon');\nconst lost = deals.filter(d => d.dealstage === 'closedlost');\nconst open = deals.filter(d => !['closedwon','closedlost'].includes(d.dealstage));\nconst stalled = open.filter(d => now - new Date(d.hs_lastmodifieddate).getTime() > 14*DAY)\n  .map(d => ({ name: d.dealname, stage: stageNames[d.dealstage] || d.dealstage, amount: Number(d.amount) || 0 }));\nconst pct = (a, b) => b ? Math.round(a / b * 1000) / 10 : 0;\nconst variants = {};\nfor (const r of rows.filter(r => r.status === 'contacted' || r.replied === 'yes')) {\n  const v = r.variant || 'none';\n  variants[v] = variants[v] || { sent: 0, replies: 0 };\n  variants[v].sent++; if (r.replied === 'yes') variants[v].replies++;\n}\nfor (const v of Object.values(variants)) v.reply_rate = pct(v.replies, v.sent);\nreturn [{ json: {\n  period: 'Deals created in the last 90 days',\n  total_deals: deals.length, open_deals: open.length,\n  open_pipeline_value: open.reduce((s, d) => s + (Number(d.amount) || 0), 0),\n  won_deals: won.length, won_value: won.reduce((s, d) => s + (Number(d.amount) || 0), 0),\n  win_rate_pct: pct(won.length, won.length + lost.length),\n  by_stage: byStage, stalled_deals: stalled, outbound_by_variant: variants,\n} }];"
+      },
+      "id": "650e8031-35c8-4476-80ac-b3504ac734b3",
+      "name": "Calculate Pipeline Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1024, temperature: 0.2, system: \"You are a sales operations analyst. Given pipeline and outbound metrics, write a short weekly summary for company leadership. Return JSON only with keys: headline (one sentence with the single most important number), insights (array of max 4 short bullets: what is working, what is stuck, which A/B variant is winning and whether the sample is big enough to trust), actions (array of max 3 specific actions for this week). Use only the numbers provided. Never invent data. Respond with the JSON object only, no other text.\", messages: [ { role: 'user', content: JSON.stringify($json) } ] }) }}",
+        "options": {}
+      },
+      "id": "be9feee1-9d63-4f56-a44d-61e6f67380a0",
+      "name": "AI Weekly Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Claude returns text in content[0].text; pull out the JSON object\nconst claudeJson = r => { const t = (r.content && r.content[0] && r.content[0].text) || ''; return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); };\nconst m = $('Calculate Pipeline Metrics').first().json;\nlet ai = {};\ntry { ai = claudeJson($input.first().json); } catch (e) { ai = { headline: 'Weekly pipeline report', insights: [], actions: [] }; }\nconst money = n => Number(n || 0).toLocaleString('en-US');\nconst li = arr => (arr || []).map(x => `<li>${x}</li>`).join('');\nconst stageRows = Object.entries(m.by_stage).map(([s, v]) => `<tr><td>${s}</td><td>${v.count}</td><td>${money(v.value)}</td></tr>`).join('');\nconst varRows = Object.entries(m.outbound_by_variant).map(([k, v]) => `<tr><td>${k}</td><td>${v.sent}</td><td>${v.replies}</td><td>${v.reply_rate}%</td></tr>`).join('');\nconst stalled = m.stalled_deals.map(d => `<li>${d.name} (${d.stage}, ${money(d.amount)})</li>`).join('') || '<li>None</li>';\nconst t = 'style=\"border-collapse:collapse\" cellpadding=\"6\" border=\"1\"';\nconst html = `<h2>${ai.headline}</h2>\n<p><b>Open pipeline:</b> ${money(m.open_pipeline_value)} across ${m.open_deals} deals &nbsp;|&nbsp; <b>Won:</b> ${m.won_deals} (${money(m.won_value)}) &nbsp;|&nbsp; <b>Win rate:</b> ${m.win_rate_pct}%</p>\n<h3>Insights</h3><ul>${li(ai.insights)}</ul>\n<h3>Actions this week</h3><ol>${li(ai.actions)}</ol>\n<h3>Pipeline by stage</h3><table ${t}><tr><th>Stage</th><th>Deals</th><th>Value</th></tr>${stageRows}</table>\n<h3>Outbound A/B test</h3><table ${t}><tr><th>Variant</th><th>Sent</th><th>Replies</th><th>Reply rate</th></tr>${varRows}</table>\n<h3>Stalled deals (no update in 14+ days)</h3><ul>${stalled}</ul>\n<p style=\"color:#888\">${m.period}. Generated automatically.</p>`;\nreturn [{ json: { subject: 'Weekly pipeline: ' + ai.headline, html } }];"
+      },
+      "id": "f3d6d1c0-0b37-4286-9ace-573288d2f5ed",
+      "name": "Build HTML Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "PASTE_SENDER_EMAIL",
+        "toEmail": "PASTE_LEADERSHIP_EMAILS",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "163de049-9706-4972-ab0b-06a284bfd3c8",
+      "name": "Email Leadership",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Every Monday 09:00": {
+      "main": [
+        [
+          {
+            "node": "Get Deals from HubSpot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Deals from HubSpot": {
+      "main": [
+        [
+          {
+            "node": "Get Outbound Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Outbound Log": {
+      "main": [
+        [
+          {
+            "node": "Calculate Pipeline Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Pipeline Metrics": {
+      "main": [
+        [
+          {
+            "node": "AI Weekly Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Weekly Summary": {
+      "main": [
+        [
+          {
+            "node": "Build HTML Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build HTML Report": {
+      "main": [
+        [
+          {
+            "node": "Email Leadership",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

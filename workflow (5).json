@@ -1,0 +1,383 @@
+{
+  "name": "05 \u00b7 WhatsApp AI Assistant: Instant Replies, Lead Qualification + Human Handoff",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "messages"
+        ]
+      },
+      "id": "f7ecec0f-89db-4501-8590-6bf56cd25d39",
+      "name": "WhatsApp: Incoming Message",
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "0c4c6fe7-b349-487f-a642-0eaba7d2c21b"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Works with the WhatsApp Trigger output (the 'value' object of the Cloud API webhook)\nconst out = [];\nfor (const item of $input.all()) {\n  const v = item.json.entry ? item.json.entry[0].changes[0].value : item.json;\n  for (const m of (v.messages || [])) {\n    if (m.type !== 'text') continue; // images, voice notes etc. go to a human\n    const contact = (v.contacts || []).find(c => c.wa_id === m.from) || {};\n    out.push({ json: { phone: m.from, name: (contact.profile && contact.profile.name) || '', text: m.text.body, message_id: m.id,\n      phone_number_id: v.metadata && v.metadata.phone_number_id, at: new Date(Number(m.timestamp) * 1000).toISOString() } });\n  }\n}\nreturn out;"
+      },
+      "id": "78f028a6-a597-4b21-99d3-da74e75339df",
+      "name": "Extract Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "WhatsApp"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "at": "={{ $json.at }}",
+            "phone": "={{ $json.phone }}",
+            "name": "={{ $json.name }}",
+            "direction": "in",
+            "text": "={{ $json.text }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "ee61021a-e561-4c41-99a7-4cca00b61e4c",
+      "name": "Save Incoming",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "WhatsApp"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "phone",
+              "lookupValue": "={{ $('Extract Message').item.json.phone }}"
+            }
+          ]
+        }
+      },
+      "id": "bad7d61a-2513-45b9-8bb2-237de015c784",
+      "name": "Get Conversation",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Last 12 messages become the conversation Claude sees\nconst msg = $('Extract Message').first().json;\nconst rows = $input.all().map(r => r.json).filter(r => r.text).slice(-12);\nconst messages = rows.map(r => ({ role: r.direction === 'in' ? 'user' : 'assistant', content: String(r.text) }));\n// Claude needs alternating turns that start with the user\nconst merged = [];\nfor (const m of messages) { if (merged.length && merged[merged.length - 1].role === m.role) merged[merged.length - 1].content += '\\n' + m.content; else merged.push({ ...m }); }\nwhile (merged.length && merged[0].role !== 'user') merged.shift();\nif (!merged.length || merged[merged.length - 1].role !== 'user') merged.push({ role: 'user', content: msg.text });\nreturn [{ json: { ...msg, history: merged } }];"
+      },
+      "id": "d9c112ad-aba3-435e-983f-4210a09346a6",
+      "name": "Build History",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1024, temperature: 0.4, system: \"You are the WhatsApp assistant for a real estate company selling homes to buyers and investors in the Middle East. You reply on behalf of the sales team. Goals: answer politely and briefly, and learn four things naturally over the conversation: budget, preferred area, property type, and timeline (and whether it is for living or investment). Ask one question at a time. Never invent prices, availability, returns or legal facts; if asked, say an advisor will confirm. Keep replies under 60 words, no emojis unless the customer uses them, match the customer's language (English or Arabic). Set handoff to true if the customer asks for a call, viewing, price list or human, or once budget and timeline are both known. Return JSON with keys: reply, handoff (boolean), lead (object with budget, area, property_type, timeline, purpose; empty strings if unknown), summary (one sentence for the sales rep). Respond with the JSON object only, no other text.\", messages: $json.history }) }}",
+        "options": {}
+      },
+      "id": "e0cdd3fb-5153-41bf-839d-6575c15c33bc",
+      "name": "Claude: Reply + Qualify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const claudeJson = r => { const t = (r.content && r.content[0] && r.content[0].text) || ''; return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); };\nconst msg = $('Build History').first().json;\nlet ai = { reply: 'Thanks for your message. An advisor will get back to you shortly.', handoff: true, lead: {}, summary: 'AI reply could not be parsed' };\ntry { ai = { ...ai, ...claudeJson($input.first().json) }; } catch (e) {}\nreturn [{ json: { ...msg, ...ai, history: undefined } }];"
+      },
+      "id": "33dcf36b-8aac-45a9-b3d1-024775d4ce82",
+      "name": "Parse Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{ $json.phone_number_id }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.phone, type: 'text', text: { body: $json.reply } }) }}",
+        "options": {}
+      },
+      "id": "be5b423a-bdef-4435-bd42-41e70ce9bfa9",
+      "name": "Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "PASTE_YOUR_GOOGLE_SHEET_URL"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "WhatsApp"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "at": "={{ new Date().toISOString() }}",
+            "phone": "={{ $('Parse Reply').item.json.phone }}",
+            "name": "={{ $('Parse Reply').item.json.name }}",
+            "direction": "out",
+            "text": "={{ $('Parse Reply').item.json.reply }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "8d0ef038-f0ae-404c-999b-bf9345055769",
+      "name": "Save Reply",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "19b0ec98-5fab-4841-a0f0-e71b6695c590",
+              "leftValue": "={{ $('Parse Reply').item.json.handoff }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fecef337-7f32-4d52-8425-c3ad653bb3fb",
+      "name": "Hand Off to Human?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "PASTE_SENDER_EMAIL",
+        "toEmail": "PASTE_SALES_TEAM_EMAIL",
+        "subject": "=WhatsApp lead ready: {{ $('Parse Reply').item.json.name || $('Parse Reply').item.json.phone }}",
+        "emailFormat": "text",
+        "text": "=A WhatsApp lead is ready for a human.\n\nName: {{ $('Parse Reply').item.json.name }}\nPhone: +{{ $('Parse Reply').item.json.phone }}\nSummary: {{ $('Parse Reply').item.json.summary }}\n\nBudget: {{ $('Parse Reply').item.json.lead.budget }}\nArea: {{ $('Parse Reply').item.json.lead.area }}\nType: {{ $('Parse Reply').item.json.lead.property_type }}\nTimeline: {{ $('Parse Reply').item.json.lead.timeline }}\nPurpose: {{ $('Parse Reply').item.json.lead.purpose }}\n\nLast message: {{ $('Parse Reply').item.json.text }}\nReply WhatsApp within the 24-hour window to keep the conversation free-form.",
+        "options": {}
+      },
+      "id": "f4f87da4-db48-4fbe-916e-45ea4dbe8f53",
+      "name": "Alert Sales Team",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2200,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "WhatsApp: Incoming Message": {
+      "main": [
+        [
+          {
+            "node": "Extract Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message": {
+      "main": [
+        [
+          {
+            "node": "Save Incoming",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Incoming": {
+      "main": [
+        [
+          {
+            "node": "Get Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Conversation": {
+      "main": [
+        [
+          {
+            "node": "Build History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build History": {
+      "main": [
+        [
+          {
+            "node": "Claude: Reply + Qualify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Reply + Qualify": {
+      "main": [
+        [
+          {
+            "node": "Parse Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Reply": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Reply": {
+      "main": [
+        [
+          {
+            "node": "Save Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Reply": {
+      "main": [
+        [
+          {
+            "node": "Hand Off to Human?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hand Off to Human?": {
+      "main": [
+        [
+          {
+            "node": "Alert Sales Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
